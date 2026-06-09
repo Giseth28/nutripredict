@@ -1,0 +1,91 @@
+version: '3.9'
+
+# ─────────────────────────────────────────────────────────────────────────────
+# docker-compose.yml — NutriPredict con Arquitectura de Microservicios
+#
+# Servicios definidos:
+#   app      → PHP 8.2 + Apache (API Gateway + Frontend)
+#   db       → MySQL 8.0 (base de datos principal)
+#   pma      → phpMyAdmin (administración visual de BD)
+#
+# Uso:
+#   docker-compose up -d          → levantar todos los servicios
+#   docker-compose down           → detener y eliminar contenedores
+#   docker-compose logs -f app    → ver logs de la app en tiempo real
+# ─────────────────────────────────────────────────────────────────────────────
+
+services:
+
+  # ── Aplicación PHP: API Gateway + Frontend ──────────────────────────────────
+  app:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    container_name: nutripredict_app
+    restart: unless-stopped
+    ports:
+      - "8080:80"              # Acceder en http://localhost:8080
+    volumes:
+      - .:/var/www/html        # Hot-reload durante desarrollo
+    depends_on:
+      db:
+        condition: service_healthy
+    environment:
+      DB_HOST: db              # Nombre del servicio MySQL en la red Docker
+      DB_NAME: nutripredict_db
+      DB_USER: nutripredict
+      DB_PASS: nutripredict123
+      ANTHROPIC_API_KEY: ${ANTHROPIC_API_KEY:-}
+    networks:
+      - nutrinet
+
+  # ── Base de Datos MySQL 8 ───────────────────────────────────────────────────
+  db:
+    image: mysql:8.0
+    container_name: nutripredict_db
+    restart: unless-stopped
+    ports:
+      - "3306:3306"
+    environment:
+      MYSQL_ROOT_PASSWORD: rootpass123
+      MYSQL_DATABASE:      nutripredict_db
+      MYSQL_USER:          nutripredict
+      MYSQL_PASSWORD:      nutripredict123
+    volumes:
+      - db_data:/var/lib/mysql
+      - ./sql/schema.sql:/docker-entrypoint-initdb.d/01_schema.sql
+      - ./sql/tokens_table.sql:/docker-entrypoint-initdb.d/02_tokens.sql
+    healthcheck:
+      test: ["CMD", "mysqladmin", "ping", "-h", "localhost", "-u", "root", "-prootpass123"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+    networks:
+      - nutrinet
+
+  # ── phpMyAdmin (solo para desarrollo) ──────────────────────────────────────
+  pma:
+    image: phpmyadmin:latest
+    container_name: nutripredict_pma
+    restart: unless-stopped
+    ports:
+      - "8081:80"              # Acceder en http://localhost:8081
+    environment:
+      PMA_HOST:         db
+      PMA_USER:         nutripredict
+      PMA_PASSWORD:     nutripredict123
+      UPLOAD_LIMIT:     64M
+    depends_on:
+      - db
+    networks:
+      - nutrinet
+
+# ── Volúmenes persistentes ────────────────────────────────────────────────────
+volumes:
+  db_data:
+    driver: local
+
+# ── Red interna ───────────────────────────────────────────────────────────────
+networks:
+  nutrinet:
+    driver: bridge
